@@ -160,3 +160,38 @@ def draw_from_saddles(d, rs, labels, features, edge_highpoints):
                 walk_up_draw(hp, labels, features, edge_highpoints)
     ax.imshow(mask, cmap='hot')
     plt.show()
+
+import networkx as nx
+
+import itertools
+
+def build_divide_tree(d, rs, labels, features, edge_highpoints):
+    tree = nx.Graph()
+    for label,t in features.items():
+        region = rs[label-1]
+        if t == 'saddle':
+            peaks = []
+            for hp in find_saddle_edge_highpoints(d, region):
+                end_coords = walk_up(hp, labels, features, edge_highpoints)
+                end_label = labels[end_coords]
+                end_t = features[end_label]
+                if end_t == 'peak':
+                    peaks.append(end_label)
+            for p1,p2 in itertools.combinations(peaks, r=2):
+                if p1 != p2:
+                    if tree.has_node(p1) and tree.has_node(p2) and nx.has_path(tree, p1, p2):
+                        path = nx.shortest_path(tree, p1, p2)
+                        edges = list(zip(path[:-1], path[1:]))
+                        basin_saddle = min(edges, key=lambda e: tree.edges[e]['elevation'])
+                        tree.remove_edge(*basin_saddle)
+                    tree.add_edge(p1, p2, saddle=label, elevation=region.mean_intensity)
+    return tree
+
+def draw_divide_tree(d, rs, tree):
+    plt.imshow(d)
+    for p1,p2 in tree.edges():
+        p1_c = rs[p1-1].centroid
+        p2_c = rs[p2-1].centroid
+        saddle_c = rs[tree.edges[p1,p2]['saddle']-1].centroid
+        plt.plot((p1_c[1],saddle_c[1],p2_c[1]), (p1_c[0],saddle_c[0],p2_c[0]))
+    plt.show()
