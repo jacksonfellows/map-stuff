@@ -24,9 +24,8 @@ import numpy as np
 import scipy
 
 ONE = np.ones((3,3), dtype=bool)
-CROSS = np.array(((0,1,0),(1,1,1),(0,1,0)), dtype=bool)
 
-CELL = np.array(((0,1,0),(1,0,1),(0,1,0)), dtype=bool)
+CELL = np.array(((1,1,1),(1,0,1),(1,1,1)), dtype=bool)
 
 # SADDLE_B = np.array((0,1,0,1,0,1), dtype=bool)
 # SADDLE_B = np.array
@@ -38,21 +37,14 @@ def find_features(d, rs):
         if min_row <= 0 or min_col <= 0 or max_row >= d.shape[0] or max_col >= d.shape[1]:
             features[region.label] = 'edge'
             continue
-        # if max_row - min_row == 1 and max_col - min_col == 1:  # optimize 1-pixel case
-        #     bounds = CELL
-        #     edge = np.array((d[min_row-1][min_col], d[min_row][min_col+1], d[min_row+1][min_col], d[min_row][min_col-1])) > region.max_intensity
-        #     if edge.all():
-        #         features[region.label] = 'pit'
-        #     elif (~edge).all():
-        #         features[region.label] = 'peak'
-        #     elif (edge == SADDLE_A).all() or (edge == SADDLE_B).all():
-        #         features[region.label] = 'saddle'
-        # else:
-        # can beat np.pad for our use case
-        image = np.zeros(tuple(x+2 for x in region.image.shape), dtype='bool')
-        image[1:-1:, 1:-1] = region.image
-        dilated = scipy.ndimage.binary_dilation(image, structure=ONE, border_value=0)
-        bounds = dilated ^ image
+        if max_row - min_row == 1 and max_col - min_col == 1:  # optimize 1-pixel case
+            bounds = CELL
+        else:
+            # can beat np.pad for our use case
+            image = np.zeros(tuple(x+2 for x in region.image.shape), dtype='bool')
+            image[1:-1:, 1:-1] = region.image
+            dilated = scipy.ndimage.binary_dilation(image, structure=ONE, border_value=0)
+            bounds = dilated ^ image
         new_slices = tuple(slice(s.start-1,s.stop+1,s.step) for s in region.slice)
         data_im = d[new_slices].copy()
         g = data_im > region.max_intensity
@@ -80,12 +72,12 @@ def find_edge_highpoints(d, rs):
         min_row, min_col, max_row, max_col = region.bbox
         if min_row <= 0 or min_col <= 0 or max_row >= d.shape[0] or max_col >= d.shape[1]:
             continue # edge
-        # if max_row - min_row == 1 and max_col - min_col == 1:  # optimize 1-pixel case
-            # bounds = CELL
-        # else:
-        image = np.zeros(tuple(x+2 for x in region.image.shape), dtype='bool')
-        image[1:-1:, 1:-1] = region.image
-        dilated = scipy.ndimage.binary_dilation(image, structure=ONE, border_value=0)
+        if max_row - min_row == 1 and max_col - min_col == 1:  # optimize 1-pixel case
+            bounds = CELL
+        else:
+            image = np.zeros(tuple(x+2 for x in region.image.shape), dtype='bool')
+            image[1:-1:, 1:-1] = region.image
+            dilated = scipy.ndimage.binary_dilation(image, structure=ONE, border_value=0)
             bounds = dilated ^ image
         new_slices = tuple(slice(s.start-1,s.stop+1,s.step) for s in region.slice)
         data_im = d[new_slices]
@@ -195,3 +187,30 @@ def draw_divide_tree(d, rs, tree):
         saddle_c = rs[tree.edges[p1,p2]['saddle']-1].centroid
         plt.plot((p1_c[1],saddle_c[1],p2_c[1]), (p1_c[0],saddle_c[0],p2_c[0]))
     plt.show()
+
+import time
+
+def time_call(f, *args, **kwargs):
+    start = time.perf_counter()
+    res = f(*args, **kwargs)
+    print(f'{f.__name__} took {time.perf_counter() - start:.2f}s')
+    return res
+
+import line_profiler
+
+def profile_call(f, *args, **kwargs):
+    lp = line_profiler.LineProfiler()
+    f_ = lp(f)
+    res = f_(*args, **kwargs)
+    lp.print_stats()
+    return res
+
+def load_and_draw_divide_tree(filename):
+    d = time_call(rxr.open_rasterio, filename, masked=True)
+    d_n = d[0].values
+    labels = time_call(find_flats, d_n)
+    regions = time_call(region_info, d_n, labels)
+    features = time_call(find_features, d_n, regions)
+    edge_highpoints = time_call(find_edge_highpoints, d_n, regions)
+    tree = time_call(build_divide_tree, d_n, regions, labels, features, edge_highpoints)
+    draw_divide_tree(d_n, regions, tree)
